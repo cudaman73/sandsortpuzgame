@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <!-- Security: restrict resource origins. unsafe-inline needed for canvas
+       animation inline styles set by JS. No network connections required. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none';" />
+  <!-- Security: suppress Referer header on any outbound navigation -->
+  <meta name="referrer" content="no-referrer" />
+  <title>Sand Sort</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- SCREENS -->
+  <div id="screen-title" class="screen active">
+    <div class="title-logo">
+      <div class="logo-bottles">
+        <div class="logo-bottle"><div class="lb-sand" style="background:#e74c3c;height:25%"></div><div class="lb-sand" style="background:#f39c12;height:25%"></div><div class="lb-sand" style="background:#2ecc71;height:25%"></div><div class="lb-sand" style="background:#3498db;height:25%"></div></div>
+        <div class="logo-bottle"><div class="lb-sand" style="background:#9b59b6;height:50%"></div><div class="lb-sand" style="background:#e74c3c;height:25%"></div></div>
+        <div class="logo-bottle"><div class="lb-sand" style="background:#3498db;height:75%"></div></div>
+      </div>
+      <h1>Sand Sort</h1>
+      <p class="subtitle">Sort the sand, clear your mind.</p>
+    </div>
+    <div class="menu-buttons">
+      <button class="btn btn-primary" id="btn-continue" style="display:none">Continue</button>
+      <button class="btn btn-primary" id="btn-new-game">New Game</button>
+      <button class="btn btn-secondary" id="btn-options-title">Options</button>
+    </div>
+  </div>
+
+  <div id="screen-game" class="screen">
+    <div id="hud">
+      <div id="hud-left">
+        <button class="icon-btn" id="btn-menu" title="Menu">☰</button>
+      </div>
+      <div id="hud-center">
+        <span id="level-label">Level 1</span>
+      </div>
+      <div id="hud-right">
+        <button class="icon-btn" id="btn-undo" title="Undo">↩</button>
+      </div>
+    </div>
+    <div id="game-area">
+      <canvas id="game-canvas"></canvas>
+    </div>
+    <div id="bottom-bar">
+      <button class="btn btn-small" id="btn-hint">Hint</button>
+    </div>
+  </div>
+
+  <div id="screen-win" class="screen">
+    <div class="overlay-card">
+      <div class="win-stars">⭐⭐⭐</div>
+      <h2>Level Complete!</h2>
+      <p id="win-level-text">Level 1 Solved</p>
+      <button class="btn btn-primary" id="btn-next-level">Next Level</button>
+      <button class="btn btn-secondary" id="btn-win-menu">Menu</button>
+    </div>
+  </div>
+
+  <div id="screen-gameover" class="screen">
+    <div class="overlay-card">
+      <div class="gameover-icon">😵</div>
+      <h2>No More Moves!</h2>
+      <p id="gameover-msg">No valid moves remain.</p>
+      <button class="btn btn-primary" id="btn-restart">Restart Level</button>
+      <button class="btn btn-secondary regen-btn" id="btn-regen-level" style="display:none">🔀 Try New Layout</button>
+      <button class="btn btn-secondary" id="btn-gameover-new">New Game</button>
+      <button class="btn btn-secondary" id="btn-gameover-menu">Menu</button>
+    </div>
+  </div>
+
+  <div id="screen-options" class="screen">
+    <div class="overlay-card">
+      <h2>Options</h2>
+      <div class="option-row">
+        <label>Sound Effects</label>
+        <button class="toggle-btn" id="toggle-sound" data-on="ON" data-off="OFF">ON</button>
+      </div>
+      <div class="option-row">
+        <label>Music</label>
+        <button class="toggle-btn" id="toggle-music" data-on="ON" data-off="OFF">OFF</button>
+      </div>
+      <div class="option-row">
+        <label>Animations</label>
+        <button class="toggle-btn" id="toggle-anim" data-on="ON" data-off="OFF">ON</button>
+      </div>
+      <hr />
+      <div class="option-row danger-row">
+        <label>Reset All Progress</label>
+        <button class="btn btn-danger" id="btn-reset-progress">Reset</button>
+      </div>
+      <button class="btn btn-primary" id="btn-options-back">Back</button>
+    </div>
+  </div>
+
+  <!-- CONFIRM DIALOG -->
+  <div id="confirm-overlay" class="hidden">
+    <div class="overlay-card">
+      <p id="confirm-text">Are you sure?</p>
+      <div class="confirm-buttons">
+        <button class="btn btn-danger" id="confirm-yes">Yes</button>
+        <button class="btn btn-secondary" id="confirm-no">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="audio.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
