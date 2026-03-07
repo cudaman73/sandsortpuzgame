@@ -43,6 +43,10 @@
         <button class="icon-btn" id="btn-undo" title="Undo">↩</button>
       </div>
     </div>
+    <div id="debug-panel" style="display:none">
+      <p id="debug-scramble"></p>
+      <p id="debug-solution"></p>
+    </div>
     <div id="game-area">
       <canvas id="game-canvas"></canvas>
     </div>
@@ -87,6 +91,10 @@
       <div class="option-row">
         <label>Animations</label>
         <button class="toggle-btn" id="toggle-anim" data-on="ON" data-off="OFF">ON</button>
+      </div>
+      <div class="option-row">
+        <label>Debug Mode</label>
+        <button class="toggle-btn" id="toggle-debug" data-on="ON" data-off="OFF">OFF</button>
       </div>
       <hr />
       <div class="option-row danger-row">

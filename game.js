@@ -116,6 +116,8 @@ function generateLevel(level) {
     // Scramble by moving one grain at a time to any bottle that has room.
     // Color rules are intentionally ignored here — we're distributing grains,
     // not playing the game. The result is thoroughly mixed.
+    // Track every grain move so debug mode can display the scramble sequence.
+    const scrambleMoves = [];
     for (let m = 0; m < shuffleMoves; m++) {
       const nonEmpty = bottles.map((_, i) => i).filter(i => bottles[i].length > 0);
       if (nonEmpty.length === 0) break;
@@ -128,22 +130,27 @@ function generateLevel(level) {
       const dstIdx = hasRoom[Math.floor(Math.random() * hasRoom.length)];
 
       bottles[dstIdx].push(bottles[srcIdx].pop());
+      scrambleMoves.push([srcIdx, dstIdx]);
     }
 
     // Accept only boards that are:
     //  1. not already in a solved state
     //  2. not immediately deadlocked (at least one legal pour exists)
-    //  3. actually solvable — proven by DFS through the reachable state space
-    if (!isSolved(bottles, numColors, capacity) &&
-        hasValidMoves(bottles, capacity) &&
-        isBoardSolvable(bottles, numColors, capacity)) {
-      return {
-        bottles: bottles.map(b => [...b]),
-        capacity,
-        colors: usedColors,
-        numColors,
-      };
-    }
+    //  3. actually solvable — proven by BFS through the reachable state space
+    if (isSolved(bottles, numColors, capacity)) continue;
+    if (!hasValidMoves(bottles, capacity)) continue;
+
+    const solution = findSolution(bottles, numColors, capacity);
+    if (solution === false) continue; // provably unsolvable — try again
+
+    return {
+      bottles: bottles.map(b => [...b]),
+      capacity,
+      colors: usedColors,
+      numColors,
+      scrambleMoves,
+      solutionPath: solution, // array of [srcIdx,dstIdx] pours, or null if budget hit
+    };
   }
 
   // Last-resort fallback: build a board guaranteed to have valid moves by
@@ -171,6 +178,8 @@ function generateLevel(level) {
     capacity,
     colors: usedColors,
     numColors,
+    scrambleMoves: [],   // fallback has no scramble history
+    solutionPath: null,  // fallback: assume solvable, path not computed
   };
 }
 
@@ -202,6 +211,10 @@ const State = {
   animating: false,
   animationsEnabled: true,
   lossCount: 0,      // times the player has hit game-over on the current level
+  // Debug mode
+  debugMode: false,
+  debugScramble: [], // [[srcIdx,dstIdx]…] grain moves from generateLevel
+  debugSolution: undefined, // [[srcIdx,dstIdx]…] | null (budget) | false (unsolvable) | undefined (not yet computed)
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -252,57 +265,70 @@ function hasValidMoves(bottles, capacity) {
 }
 
 /**
- * Prove that a board is actually solvable using iterative DFS.
+ * Find a solution path using BFS with exact state keys and parent-pointer
+ * path reconstruction.
  *
- * Why DFS instead of BFS: we only need to know IF a solution exists, not the
- * shortest path, so DFS's O(1) stack.pop() is faster than BFS's O(n) queue.shift().
+ * Exact keys (not sorted): ensures the reconstructed move sequence is valid
+ * when replayed on the actual board — bottle indices in each recorded move
+ * correspond to the real board positions at that point in the BFS.
  *
- * Canonical state key: bottles are sorted before joining so that two boards
- * differing only in bottle order are treated as the same state. This cuts the
- * visited-state set size dramatically and avoids re-exploring mirror positions.
+ * Returns:
+ *   []        — already solved at the start (generation bug, should not happen)
+ *   [[s,d]…]  — shortest solution as game-pour moves (1-indexed for display)
+ *   null      — budget exceeded; board is assumed solvable, path unavailable
+ *   false     — exhausted all reachable states; board is provably unsolvable
  *
- * maxStates budget: unsolvable boards tend to have SMALL reachable state spaces
- * (deadlocks appear quickly). If we exceed the budget, the board is almost
- * certainly solvable — we just haven't found the path within the limit. This
- * assumption is safe because large late-game configs (12 colors, 2 extra
- * empties) have astronomical state spaces and are almost never truly unsolvable.
+ * maxStates budget: unsolvable boards deadlock quickly (small reachable space).
+ * If we exceed the budget the board almost certainly IS solvable.
  */
-function isBoardSolvable(startBottles, numColors, capacity, maxStates = 50000) {
-  if (isSolved(startBottles, numColors, capacity)) return true;
+function findSolution(startBottles, numColors, capacity, maxStates = 50000) {
+  if (isSolved(startBottles, numColors, capacity)) return [];
 
-  // Canonical key: sort bottle strings so position order doesn't matter
-  const stateKey = (btls) => btls.map(b => b.join(',')).sort().join('|');
+  // Exact key preserves bottle order so path reconstruction is always correct
+  const stateKey = (btls) => btls.map(b => b.join(',')).join('|');
 
-  const visited = new Set();
-  visited.add(stateKey(startBottles));
+  // Map: stateKey → { parentKey, move: [srcIdx, dstIdx] | null }
+  const visited = new Map();
+  const startKey = stateKey(startBottles);
+  visited.set(startKey, { parentKey: null, move: null });
 
-  const stack = [startBottles.map(b => [...b])];
+  const queue = [{ key: startKey, bottles: startBottles.map(b => [...b]) }];
+  let head = 0;
 
-  while (stack.length > 0) {
-    const bottles = stack.pop();
+  while (head < queue.length) {
+    const { key: currentKey, bottles } = queue[head++];
 
     for (let s = 0; s < bottles.length; s++) {
       for (let d = 0; d < bottles.length; d++) {
         if (!canPour(bottles, capacity, s, d)) continue;
 
-        // Apply the pour to a copy
         const next = bottles.map(b => [...b]);
         const { count } = getTopRun(next[s]);
         for (let i = 0; i < count; i++) next[d].push(next[s].pop());
 
-        if (isSolved(next, numColors, capacity)) return true;
-
         const key = stateKey(next);
-        if (!visited.has(key)) {
-          visited.add(key);
-          if (visited.size >= maxStates) return true; // budget hit — assume solvable
-          stack.push(next);
+        if (visited.has(key)) continue;
+
+        visited.set(key, { parentKey: currentKey, move: [s, d] });
+
+        if (isSolved(next, numColors, capacity)) {
+          // Reconstruct shortest path by following parent pointers
+          const path = [];
+          let k = key;
+          while (visited.get(k).move !== null) {
+            path.unshift(visited.get(k).move);
+            k = visited.get(k).parentKey;
+          }
+          return path;
         }
+
+        if (visited.size >= maxStates) return null; // budget hit — assume solvable
+        queue.push({ key, bottles: next });
       }
     }
   }
 
-  return false; // exhausted all reachable states without finding a solution
+  return false; // exhausted all reachable states — provably unsolvable
 }
 
 /** Check if all bottles are solved */
@@ -527,6 +553,23 @@ function drawBottle(i, selected, hinted) {
   }
 
   ctx2d.restore();
+
+  // Debug overlay: bottle number drawn just above the neck opening
+  if (State.debugMode) {
+    ctx2d.save();
+    const numSize = Math.max(11, Math.min(16, neckW * 0.55));
+    ctx2d.font = `bold ${numSize}px monospace`;
+    ctx2d.textAlign = 'center';
+    ctx2d.textBaseline = 'bottom';
+    const label = String(i + 1);
+    // Dark outline for legibility against any background
+    ctx2d.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx2d.lineWidth = 3;
+    ctx2d.strokeText(label, x, y - 3);
+    ctx2d.fillStyle = '#f5a623';
+    ctx2d.fillText(label, x, y - 3);
+    ctx2d.restore();
+  }
 }
 
 function drawSandTexture(x, y, w, h, color) {
@@ -570,6 +613,62 @@ function render() {
     const selected = i === State.selectedBottle;
     const hinted = i === hintBottles[0] || i === hintBottles[1];
     drawBottle(i, selected, hinted);
+  }
+}
+
+/**
+ * Show or hide the debug panel and populate it with scramble + solution data.
+ * The solution is computed lazily the first time the panel is shown.
+ */
+function updateDebugPanel() {
+  const panel = document.getElementById('debug-panel');
+  if (!panel) return;
+
+  if (!State.debugMode) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = '';
+
+  // ── Scramble line ────────────────────────────────────────────────────────
+  const scrambleEl = document.getElementById('debug-scramble');
+  if (scrambleEl) {
+    const moves = State.debugScramble;
+    if (!moves || moves.length === 0) {
+      scrambleEl.textContent = 'Scramble: (fallback layout — no grain history)';
+    } else {
+      const MAX = 40;
+      const shown = moves.slice(0, MAX).map(([s, d]) => `${s + 1}→${d + 1}`).join(' ');
+      const extra = moves.length > MAX ? `  …+${moves.length - MAX} more` : '';
+      scrambleEl.textContent = `Scramble (${moves.length} grain mvs): ${shown}${extra}`;
+    }
+  }
+
+  // ── Solution line — compute lazily if not yet available ──────────────────
+  if (State.debugSolution === undefined && State.initialBottles && State.initialBottles.length > 0) {
+    State.debugSolution = findSolution(
+      State.initialBottles, State.numColors, State.capacity
+    );
+  }
+
+  const solEl = document.getElementById('debug-solution');
+  if (solEl) {
+    const sol = State.debugSolution;
+    if (sol === false) {
+      solEl.textContent = 'Solution: ⚠ UNSOLVABLE — no valid path exists from starting position!';
+      solEl.style.color = '#e74c3c';
+    } else if (sol === null) {
+      solEl.textContent = 'Solution: (budget exceeded — assumed solvable; path not available)';
+      solEl.style.color = '#f5a623';
+    } else if (!Array.isArray(sol) || sol.length === 0) {
+      solEl.textContent = 'Solution: (board was already solved at generation — generation bug!)';
+      solEl.style.color = '#e74c3c';
+    } else {
+      const formatted = sol.map(([s, d]) => `${s + 1}→${d + 1}`).join(', ');
+      solEl.textContent = `Solution (${sol.length} pours): ${formatted}`;
+      solEl.style.color = '#2ecc71';
+    }
   }
 }
 
@@ -893,9 +992,17 @@ function startLevel(level) {
   State.numColors = levelData.numColors;
   State.initialBottles = levelData.bottles.map(b => [...b]);
 
+  // Store debug data for this level
+  State.debugScramble = levelData.scrambleMoves || [];
+  // Compute solution eagerly if debug mode is on; otherwise defer until panel opens
+  State.debugSolution = State.debugMode
+    ? findSolution(State.initialBottles, State.numColors, State.capacity)
+    : undefined;
+
   document.getElementById('level-label').textContent = `Level ${level}`;
   computeLayout();
   render();
+  updateDebugPanel();
   saveProgress();
 }
 
@@ -907,6 +1014,7 @@ function restartLevel() {
   clearHint();
   computeLayout();
   render();
+  updateDebugPanel();
   saveProgress();
 }
 
@@ -956,6 +1064,9 @@ function saveProgress() {
     sfxEnabled: Audio.getSfxEnabled(),
     musicEnabled: Audio.getMusicEnabled(),
     animationsEnabled: State.animationsEnabled,
+    debugMode: State.debugMode,
+    debugScramble: State.debugScramble,
+    debugSolution: State.debugSolution,
   });
 }
 
@@ -979,6 +1090,11 @@ function loadProgress() {
     if (save.sfxEnabled !== undefined) Audio.setSfx(save.sfxEnabled);
     if (save.musicEnabled !== undefined) Audio.setMusic(save.musicEnabled);
     if (save.animationsEnabled !== undefined) State.animationsEnabled = save.animationsEnabled;
+
+    State.debugMode = save.debugMode || false;
+    State.debugScramble = save.debugScramble || [];
+    // undefined = not yet computed; keep it so the panel computes lazily if opened
+    State.debugSolution = save.debugSolution !== undefined ? save.debugSolution : undefined;
 
     return true;
   } catch (e) {
@@ -1055,6 +1171,7 @@ function wireButtons() {
       document.getElementById('level-label').textContent = `Level ${State.level}`;
       computeLayout();
       render();
+      updateDebugPanel();
       showScreen('screen-game');
       // Check if loaded state is already stuck or won
       setTimeout(() => {
@@ -1169,6 +1286,19 @@ function wireButtons() {
     saveProgress();
   });
 
+  document.getElementById('toggle-debug').addEventListener('click', () => {
+    State.debugMode = !State.debugMode;
+    // If turning on and solution hasn't been computed yet, compute it now
+    if (State.debugMode && State.debugSolution === undefined && State.initialBottles && State.initialBottles.length > 0) {
+      State.debugSolution = findSolution(State.initialBottles, State.numColors, State.capacity);
+    }
+    updateToggle('toggle-debug', State.debugMode);
+    Audio.playClick();
+    updateDebugPanel();
+    render(); // redraw to show/hide bottle numbers
+    saveProgress();
+  });
+
   // Confirm dialog
   document.getElementById('confirm-no').addEventListener('click', () => {
     document.getElementById('confirm-overlay').classList.add('hidden');
@@ -1186,6 +1316,7 @@ function updateOptionsUI() {
   updateToggle('toggle-sound', Audio.getSfxEnabled());
   updateToggle('toggle-music', Audio.getMusicEnabled());
   updateToggle('toggle-anim', State.animationsEnabled);
+  updateToggle('toggle-debug', State.debugMode);
 }
 
 function updateToggle(id, active) {

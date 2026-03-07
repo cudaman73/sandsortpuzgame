@@ -319,6 +319,26 @@ hr {
   gap: 12px;
 }
 
+/* ===== DEBUG PANEL ===== */
+#debug-panel {
+  width: 100%;
+  padding: 4px 12px;
+  font-family: monospace;
+  font-size: 0.68rem;
+  color: #f5a623;
+  background: rgba(0,0,0,0.5);
+  border-bottom: 1px solid rgba(245,166,35,0.25);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+#debug-panel p {
+  margin: 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.45;
+}
+
 /* ===== CANVAS BOTTLE STYLES (drawn via JS) ===== */
 /* These are reference values used by game.js */
 
