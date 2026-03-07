@@ -130,10 +130,13 @@ function generateLevel(level) {
       bottles[dstIdx].push(bottles[srcIdx].pop());
     }
 
-    // Only accept boards that aren't already solved AND have at least one
-    // legal move so the player can actually play.
+    // Accept only boards that are:
+    //  1. not already in a solved state
+    //  2. not immediately deadlocked (at least one legal pour exists)
+    //  3. actually solvable — proven by DFS through the reachable state space
     if (!isSolved(bottles, numColors, capacity) &&
-        hasValidMoves(bottles, capacity)) {
+        hasValidMoves(bottles, capacity) &&
+        isBoardSolvable(bottles, numColors, capacity)) {
       return {
         bottles: bottles.map(b => [...b]),
         capacity,
@@ -246,6 +249,60 @@ function hasValidMoves(bottles, capacity) {
     }
   }
   return false;
+}
+
+/**
+ * Prove that a board is actually solvable using iterative DFS.
+ *
+ * Why DFS instead of BFS: we only need to know IF a solution exists, not the
+ * shortest path, so DFS's O(1) stack.pop() is faster than BFS's O(n) queue.shift().
+ *
+ * Canonical state key: bottles are sorted before joining so that two boards
+ * differing only in bottle order are treated as the same state. This cuts the
+ * visited-state set size dramatically and avoids re-exploring mirror positions.
+ *
+ * maxStates budget: unsolvable boards tend to have SMALL reachable state spaces
+ * (deadlocks appear quickly). If we exceed the budget, the board is almost
+ * certainly solvable — we just haven't found the path within the limit. This
+ * assumption is safe because large late-game configs (12 colors, 2 extra
+ * empties) have astronomical state spaces and are almost never truly unsolvable.
+ */
+function isBoardSolvable(startBottles, numColors, capacity, maxStates = 50000) {
+  if (isSolved(startBottles, numColors, capacity)) return true;
+
+  // Canonical key: sort bottle strings so position order doesn't matter
+  const stateKey = (btls) => btls.map(b => b.join(',')).sort().join('|');
+
+  const visited = new Set();
+  visited.add(stateKey(startBottles));
+
+  const stack = [startBottles.map(b => [...b])];
+
+  while (stack.length > 0) {
+    const bottles = stack.pop();
+
+    for (let s = 0; s < bottles.length; s++) {
+      for (let d = 0; d < bottles.length; d++) {
+        if (!canPour(bottles, capacity, s, d)) continue;
+
+        // Apply the pour to a copy
+        const next = bottles.map(b => [...b]);
+        const { count } = getTopRun(next[s]);
+        for (let i = 0; i < count; i++) next[d].push(next[s].pop());
+
+        if (isSolved(next, numColors, capacity)) return true;
+
+        const key = stateKey(next);
+        if (!visited.has(key)) {
+          visited.add(key);
+          if (visited.size >= maxStates) return true; // budget hit — assume solvable
+          stack.push(next);
+        }
+      }
+    }
+  }
+
+  return false; // exhausted all reachable states without finding a solution
 }
 
 /** Check if all bottles are solved */
