@@ -1469,7 +1469,7 @@ function loadProgress() {
     State.bottles = save.bottles;
     State.capacity = save.capacity;
     State.numColors = save.numColors;
-    State.colors = save.colorIds.map(id => SAND_COLORS.find(c => c.id === id));
+    State.colors = save.colorIds.map(id => SAND_COLORS.find(c => c.id === id) || SAND_COLORS[0]);
     State.initialBottles = save.initialBottles;
     State.history = save.history || [];
     State.selectedBottle = -1;
