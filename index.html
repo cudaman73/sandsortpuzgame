@@ -32,16 +32,27 @@
   </div>
 
   <div id="screen-game" class="screen">
+    <!-- Progress bar at very top -->
+    <div id="progress-bar-container">
+      <div id="progress-bar-fill"></div>
+    </div>
     <div id="hud">
       <div id="hud-left">
-        <button class="icon-btn" id="btn-menu" title="Menu">☰</button>
+        <button class="icon-btn" id="btn-menu" title="Menu">&#9776;</button>
       </div>
       <div id="hud-center">
         <span id="level-label">Level 1</span>
       </div>
       <div id="hud-right">
-        <button class="icon-btn" id="btn-undo" title="Undo">↩</button>
+        <span id="hud-score" class="hud-stat">0</span>
+        <button class="icon-btn" id="btn-undo" title="Undo">&#8617;</button>
       </div>
+    </div>
+    <!-- Secondary HUD row: moves + hints -->
+    <div id="hud-secondary">
+      <span id="move-counter" class="hud-stat-small">Moves: 0</span>
+      <span id="par-display" class="hud-stat-small"></span>
+      <span id="streak-display" class="hud-stat-small" style="display:none"></span>
     </div>
     <div id="debug-panel" style="display:none">
       <p id="debug-scramble"></p>
@@ -49,29 +60,59 @@
     </div>
     <div id="game-area">
       <canvas id="game-canvas"></canvas>
+      <!-- Floating score popups are rendered here -->
+      <div id="popup-layer"></div>
     </div>
     <div id="bottom-bar">
-      <button class="btn btn-small" id="btn-hint">Hint</button>
+      <button class="btn btn-small" id="btn-hint">
+        <span id="hint-icon">&#128161;</span>
+        <span id="hint-count"></span>
+        Hint
+      </button>
     </div>
+    <!-- Combo / streak toast -->
+    <div id="combo-toast" class="toast hidden"></div>
+    <!-- Session milestone toast -->
+    <div id="milestone-toast" class="toast milestone-toast hidden"></div>
   </div>
 
   <div id="screen-win" class="screen">
-    <div class="overlay-card">
-      <div class="win-stars">⭐⭐⭐</div>
+    <div class="overlay-card win-card">
+      <div class="win-stars" id="win-stars">
+        <span class="star" id="star-1">&#11088;</span>
+        <span class="star" id="star-2">&#11088;</span>
+        <span class="star" id="star-3">&#11088;</span>
+      </div>
       <h2>Level Complete!</h2>
       <p id="win-level-text">Level 1 Solved</p>
-      <button class="btn btn-primary" id="btn-next-level">Next Level</button>
-      <button class="btn btn-secondary" id="btn-win-menu">Menu</button>
+      <div id="win-stats">
+        <div class="win-stat">
+          <span class="win-stat-label">Moves</span>
+          <span class="win-stat-value" id="win-moves">0</span>
+        </div>
+        <div class="win-stat">
+          <span class="win-stat-label">Score</span>
+          <span class="win-stat-value" id="win-score">0</span>
+        </div>
+        <div class="win-stat">
+          <span class="win-stat-label">Total</span>
+          <span class="win-stat-value" id="win-total-score">0</span>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-next-level" id="btn-next-level">Next Level</button>
+      <button class="btn btn-secondary btn-win-menu" id="btn-win-menu">Menu</button>
     </div>
+    <!-- Confetti canvas layer -->
+    <canvas id="confetti-canvas"></canvas>
   </div>
 
   <div id="screen-gameover" class="screen">
     <div class="overlay-card">
-      <div class="gameover-icon">😵</div>
+      <div class="gameover-icon">&#128565;</div>
       <h2>No More Moves!</h2>
       <p id="gameover-msg">No valid moves remain.</p>
       <button class="btn btn-primary" id="btn-restart">Restart Level</button>
-      <button class="btn btn-secondary regen-btn" id="btn-regen-level" style="display:none">🔀 Try New Layout</button>
+      <button class="btn btn-secondary regen-btn" id="btn-regen-level" style="display:none">&#128256; Try New Layout</button>
       <button class="btn btn-secondary" id="btn-gameover-new">New Game</button>
       <button class="btn btn-secondary" id="btn-gameover-menu">Menu</button>
     </div>
