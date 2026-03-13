@@ -1170,10 +1170,11 @@ function animateTipPour(srcIdx, dstIdx, colorIdx, count, onComplete) {
   const tipSign = tipRight ? 1 : -1;
   const tipAngle = tipSign * (Math.PI * 0.52); // ~94 degrees
 
-  // Fly-to position: above the destination, offset so mouth aligns
-  // Source bottle hangs with its bottom just above destination mouth
-  const hoverX = dstPos.x - tipSign * bW * 0.15;
-  const hoverY = dstPos.y - (neckH + bH) - 10;
+  // Fly-to position: mouth of source just above mouth of destination
+  // The pivot is at the mouth (pivotOffY=0), so (hoverX, hoverY) IS the mouth pos.
+  // Offset X so tilted body doesn't overlap destination bottle
+  const hoverX = dstPos.x - tipSign * bW * 0.4;
+  const hoverY = dstPos.y - neckH * 1.5;
 
   // Pivot point for rotation (mouth of bottle — pos.y IS the mouth)
   const pivotOffY = 0;
