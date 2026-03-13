@@ -4,12 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <!-- Security: restrict resource origins. unsafe-inline needed for canvas
-       animation inline styles set by JS. No network connections required. -->
+       animation inline styles set by JS. Google Fonts allowed. -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none';" />
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'none';" />
   <!-- Security: suppress Referer header on any outbound navigation -->
   <meta name="referrer" content="no-referrer" />
   <title>Sand Sort</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -22,7 +25,7 @@
         <div class="logo-bottle"><div class="lb-sand" style="background:#3498db;height:75%"></div></div>
       </div>
       <h1>Sand Sort</h1>
-      <p class="subtitle">Sort the sand, clear your mind.</p>
+      <p class="subtitle">Sort the sand, clear your mind!</p>
     </div>
     <div class="menu-buttons">
       <button class="btn btn-primary" id="btn-continue" style="display:none">Continue</button>
@@ -32,43 +35,52 @@
   </div>
 
   <div id="screen-game" class="screen">
-    <!-- Progress bar at very top -->
-    <div id="progress-bar-container">
-      <div id="progress-bar-fill"></div>
-    </div>
-    <div id="hud">
-      <div id="hud-left">
-        <button class="icon-btn" id="btn-menu" title="Menu">&#9776;</button>
+    <!-- Top panel: HUD + controls (top ~1/3) -->
+    <div id="top-panel">
+      <!-- Progress bar -->
+      <div id="progress-bar-container">
+        <div id="progress-bar-fill"></div>
       </div>
-      <div id="hud-center">
-        <span id="level-label">Level 1</span>
+      <!-- Main HUD row -->
+      <div id="hud">
+        <div id="hud-left">
+          <button class="icon-btn" id="btn-menu" title="Menu">&#9776;</button>
+        </div>
+        <div id="hud-center">
+          <div id="level-badge">
+            <span id="level-label">Level 1</span>
+          </div>
+        </div>
+        <div id="hud-right">
+          <span id="hud-score" class="hud-stat">0</span>
+        </div>
       </div>
-      <div id="hud-right">
-        <span id="hud-score" class="hud-stat">0</span>
-        <button class="icon-btn" id="btn-undo" title="Undo">&#8617;</button>
+      <!-- Secondary HUD row -->
+      <div id="hud-secondary">
+        <span id="move-counter" class="hud-pill">Moves: 0</span>
+        <span id="par-display" class="hud-pill"></span>
+        <span id="streak-display" class="hud-pill" style="display:none"></span>
+      </div>
+      <!-- Action buttons row -->
+      <div id="hud-actions">
+        <button class="action-btn" id="btn-undo" title="Undo">&#8617; Undo</button>
+        <button class="action-btn action-btn-hint" id="btn-hint">
+          <span id="hint-icon">&#128161;</span>
+          <span id="hint-count"></span>
+          Hint
+        </button>
       </div>
     </div>
-    <!-- Secondary HUD row: moves + hints -->
-    <div id="hud-secondary">
-      <span id="move-counter" class="hud-stat-small">Moves: 0</span>
-      <span id="par-display" class="hud-stat-small"></span>
-      <span id="streak-display" class="hud-stat-small" style="display:none"></span>
-    </div>
+    <!-- Debug panel (hidden by default) -->
     <div id="debug-panel" style="display:none">
       <p id="debug-scramble"></p>
       <p id="debug-solution"></p>
     </div>
+    <!-- Game area: bottom ~2/3 -->
     <div id="game-area">
       <canvas id="game-canvas"></canvas>
       <!-- Floating score popups are rendered here -->
       <div id="popup-layer"></div>
-    </div>
-    <div id="bottom-bar">
-      <button class="btn btn-small" id="btn-hint">
-        <span id="hint-icon">&#128161;</span>
-        <span id="hint-count"></span>
-        Hint
-      </button>
     </div>
     <!-- Combo / streak toast -->
     <div id="combo-toast" class="toast hidden"></div>
@@ -99,7 +111,7 @@
           <span class="win-stat-value" id="win-total-score">0</span>
         </div>
       </div>
-      <button class="btn btn-primary btn-next-level" id="btn-next-level">Next Level</button>
+      <button class="btn btn-primary btn-next-level" id="btn-next-level">Next Level &#127881;</button>
       <button class="btn btn-secondary btn-win-menu" id="btn-win-menu">Menu</button>
     </div>
     <!-- Confetti canvas layer -->
