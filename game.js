@@ -393,11 +393,11 @@ function initBgParticles() {
 
 function makeBgParticle(w, h, randomY) {
   const palette = [
-    { r: 60, g: 100, b: 180 },
-    { r: 100, g: 60, b: 160 },
-    { r: 40, g: 140, b: 160 },
-    { r: 80, g: 80, b: 200 },
-    { r: 140, g: 80, b: 120 },
+    { r: 255, g: 180, b: 220 },  // pastel pink
+    { r: 255, g: 220, b: 100 },  // warm yellow
+    { r: 140, g: 230, b: 180 },  // mint green
+    { r: 160, g: 200, b: 255 },  // light blue
+    { r: 255, g: 190, b: 130 },  // peach
   ];
   const col = palette[Math.floor(Math.random() * palette.length)];
   return {
@@ -405,7 +405,7 @@ function makeBgParticle(w, h, randomY) {
     y: randomY ? Math.random() * h : h + Math.random() * 60,
     radius: 12 + Math.random() * 35,
     r: col.r, g: col.g, b: col.b,
-    alpha: 0.025 + Math.random() * 0.055,
+    alpha: 0.04 + Math.random() * 0.07,
     vx: (Math.random() - 0.5) * 0.25,
     vy: -(0.08 + Math.random() * 0.3),
     drift: Math.random() * Math.PI * 2,
@@ -417,11 +417,11 @@ function drawBackground(now) {
   const w = canvas.width;
   const h = canvas.height;
 
-  // Shifting gradient base
-  const hue = 215 + Math.sin(now / 30000) * 12;
+  // Shifting gradient base — sky blue / teal for cartoony theme
+  const hue = 205 + Math.sin(now / 30000) * 15;
   const grad = ctx2d.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, `hsl(${hue}, 35%, 5%)`);
-  grad.addColorStop(1, `hsl(${hue + 10}, 28%, 9%)`);
+  grad.addColorStop(0, `hsl(${hue}, 55%, 52%)`);
+  grad.addColorStop(1, `hsl(${hue + 10}, 50%, 42%)`);
   ctx2d.fillStyle = grad;
   ctx2d.fillRect(0, 0, w, h);
 
@@ -1171,11 +1171,12 @@ function animateTipPour(srcIdx, dstIdx, colorIdx, count, onComplete) {
   const tipAngle = tipSign * (Math.PI * 0.52); // ~94 degrees
 
   // Fly-to position: above the destination, offset so mouth aligns
+  // Source bottle hangs with its bottom just above destination mouth
   const hoverX = dstPos.x - tipSign * bW * 0.15;
-  const hoverY = dstPos.y - bH * 0.45 - neckH;
+  const hoverY = dstPos.y - (neckH + bH) - 10;
 
-  // Pivot point for rotation (center of bottle)
-  const pivotOffY = neckH + bH / 2;
+  // Pivot point for rotation (mouth of bottle — pos.y IS the mouth)
+  const pivotOffY = 0;
 
   // Phase timings
   const FLY_OVER = 300;
@@ -1200,7 +1201,7 @@ function animateTipPour(srcIdx, dstIdx, colorIdx, count, onComplete) {
 
   function getMouthPos(posX, posY, rotation) {
     // Mouth is at top-center of bottle when upright
-    // When rotated around pivot (center of bottle), calculate new position
+    // Rotated around pivot at the mouth — so mouth position just translates
     const px = posX;
     const py = posY + pivotOffY;
     const mouthRelX = 0;
