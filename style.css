@@ -184,7 +184,7 @@ h1 {
 
 /* ===== GAME SCREEN ===== */
 #screen-game {
-  background: linear-gradient(180deg, #0d1b2a 0%, #1a1a2e 100%);
+  background: #0d1b2a;
   justify-content: flex-start;
 }
 
