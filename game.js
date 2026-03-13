@@ -369,12 +369,121 @@ function computeLayout() {
     const y = Layout.startY + row * (bH + Layout.neckH + Layout.padding);
     Layout.bottlePositions.push({ x, y });
   }
+
+  // Re-initialize background particles for new canvas size
+  initBgParticles();
+  invalidateSandTextureCache();
+}
+
+// ── Animated Background System ─────────────────────────────────────────────
+
+const BG_PARTICLE_COUNT = 30;
+let bgParticles = [];
+let bgLoopRunning = false;
+let bgLoopId = null;
+
+function initBgParticles() {
+  bgParticles = [];
+  const w = canvas.width || window.innerWidth;
+  const h = canvas.height || window.innerHeight;
+  for (let i = 0; i < BG_PARTICLE_COUNT; i++) {
+    bgParticles.push(makeBgParticle(w, h, true));
+  }
+}
+
+function makeBgParticle(w, h, randomY) {
+  const palette = [
+    { r: 60, g: 100, b: 180 },
+    { r: 100, g: 60, b: 160 },
+    { r: 40, g: 140, b: 160 },
+    { r: 80, g: 80, b: 200 },
+    { r: 140, g: 80, b: 120 },
+  ];
+  const col = palette[Math.floor(Math.random() * palette.length)];
+  return {
+    x: Math.random() * w,
+    y: randomY ? Math.random() * h : h + Math.random() * 60,
+    radius: 12 + Math.random() * 35,
+    r: col.r, g: col.g, b: col.b,
+    alpha: 0.025 + Math.random() * 0.055,
+    vx: (Math.random() - 0.5) * 0.25,
+    vy: -(0.08 + Math.random() * 0.3),
+    drift: Math.random() * Math.PI * 2,
+    driftSpeed: 0.0003 + Math.random() * 0.0008,
+  };
+}
+
+function drawBackground(now) {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Shifting gradient base
+  const hue = 215 + Math.sin(now / 30000) * 12;
+  const grad = ctx2d.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, `hsl(${hue}, 35%, 5%)`);
+  grad.addColorStop(1, `hsl(${hue + 10}, 28%, 9%)`);
+  ctx2d.fillStyle = grad;
+  ctx2d.fillRect(0, 0, w, h);
+
+  // Bokeh particles
+  for (const p of bgParticles) {
+    p.x += p.vx + Math.sin(now * p.driftSpeed + p.drift) * 0.15;
+    p.y += p.vy;
+
+    // Respawn at bottom
+    if (p.y + p.radius < -10) {
+      Object.assign(p, makeBgParticle(w, h, false));
+    }
+    // Wrap horizontally
+    if (p.x < -p.radius) p.x = w + p.radius;
+    if (p.x > w + p.radius) p.x = -p.radius;
+
+    const g = ctx2d.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius);
+    g.addColorStop(0, `rgba(${p.r},${p.g},${p.b},${p.alpha})`);
+    g.addColorStop(1, `rgba(${p.r},${p.g},${p.b},0)`);
+    ctx2d.fillStyle = g;
+    ctx2d.fillRect(p.x - p.radius, p.y - p.radius, p.radius * 2, p.radius * 2);
+  }
+}
+
+function startBgLoop() {
+  if (bgLoopRunning) return;
+  bgLoopRunning = true;
+  function loop() {
+    const gameScreen = document.getElementById('screen-game');
+    if (!gameScreen || !gameScreen.classList.contains('active')) {
+      bgLoopRunning = false;
+      return;
+    }
+    if (!State.animating && !needsAnimationFrame) {
+      render();
+    }
+    bgLoopId = requestAnimationFrame(loop);
+  }
+  bgLoopId = requestAnimationFrame(loop);
+}
+
+function stopBgLoop() {
+  bgLoopRunning = false;
+  if (bgLoopId) { cancelAnimationFrame(bgLoopId); bgLoopId = null; }
 }
 
 // ── Drawing helpers ────────────────────────────────────────────────────────
 
 // Active visual effects
 let bottleEffects = {}; // { bottleIndex: { type, startTime, color } }
+
+// Per-bottle transforms for tip-pour animation
+const bottleTransforms = {}; // { bottleIdx: { dx, dy, rotation, pivotX, pivotY } }
+
+// Cached sand texture dots (deterministic per bottle state)
+const sandTextureCache = new Map(); // key: bottleIdx → [{x,y,r,bright}]
+let sandTextureCacheVersion = 0; // increment on state change to invalidate
+
+function invalidateSandTextureCache() {
+  sandTextureCache.clear();
+  sandTextureCacheVersion++;
+}
 
 function drawBottle(i, selected, hinted) {
   const pos = Layout.bottlePositions[i];
@@ -384,6 +493,14 @@ function drawBottle(i, selected, hinted) {
   const capacity = State.capacity;
 
   ctx2d.save();
+
+  // Apply per-bottle transform (used during tip-pour animation)
+  const tf = bottleTransforms[i];
+  if (tf) {
+    ctx2d.translate(tf.pivotX + (tf.dx || 0), tf.pivotY + (tf.dy || 0));
+    ctx2d.rotate(tf.rotation || 0);
+    ctx2d.translate(-tf.pivotX, -tf.pivotY);
+  }
 
   // Glow for selected
   if (selected) {
@@ -399,7 +516,34 @@ function drawBottle(i, selected, hinted) {
   const bodyW = bW;
   const bodyH = bH;
 
+  // ── Glass tint fill (subtle blue glass) ──
+  ctx2d.save();
+  ctx2d.beginPath();
+  roundRect(ctx2d, bodyX, bodyY, bodyW, bodyH, br);
+  const glassTint = ctx2d.createRadialGradient(
+    x, bodyY + bodyH * 0.4, bW * 0.1,
+    x, bodyY + bodyH * 0.5, bW * 0.9
+  );
+  glassTint.addColorStop(0, 'rgba(160,200,255,0.06)');
+  glassTint.addColorStop(1, 'rgba(100,150,220,0.02)');
+  ctx2d.fillStyle = glassTint;
+  ctx2d.fill();
+  ctx2d.restore();
+
+  // ── Inner shadow at bottom ──
+  ctx2d.save();
+  ctx2d.beginPath();
+  roundRect(ctx2d, bodyX + 2, bodyY + 2, bodyW - 4, bodyH - 4, br - 1);
+  ctx2d.clip();
+  const innerShadow = ctx2d.createLinearGradient(bodyX, bodyY + bodyH - bH * 0.15, bodyX, bodyY + bodyH);
+  innerShadow.addColorStop(0, 'rgba(0,0,0,0)');
+  innerShadow.addColorStop(1, 'rgba(0,0,0,0.12)');
+  ctx2d.fillStyle = innerShadow;
+  ctx2d.fillRect(bodyX, bodyY + bodyH - bH * 0.15, bodyW, bH * 0.15);
+  ctx2d.restore();
+
   // Clip to bottle interior for sand
+  ctx2d.save();
   ctx2d.beginPath();
   roundRect(ctx2d, bodyX + 2, bodyY + 2, bodyW - 4, bodyH - 4, br - 1);
   ctx2d.clip();
@@ -413,22 +557,58 @@ function drawBottle(i, selected, hinted) {
     const color = State.colors[colorIdx];
     if (!color) continue;
     const ly = bodyY + 2 + (capacity - 1 - l) * layerH;
+    const isTopLayer = (l === bottle.length - 1);
+
     ctx2d.fillStyle = color.hex;
     ctx2d.fillRect(bodyX + 2, ly, bodyW - 4, layerH + 1);
 
-    const grad = ctx2d.createLinearGradient(bodyX + 2, ly, bodyX + bodyW - 2, ly);
-    grad.addColorStop(0, 'rgba(255,255,255,0.12)');
-    grad.addColorStop(0.4, 'rgba(255,255,255,0.04)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.15)');
-    ctx2d.fillStyle = grad;
+    // Cylindrical shading — dark edges, bright center
+    const cylGrad = ctx2d.createLinearGradient(bodyX + 2, ly, bodyX + bodyW - 2, ly);
+    cylGrad.addColorStop(0, 'rgba(0,0,0,0.18)');
+    cylGrad.addColorStop(0.15, 'rgba(255,255,255,0.08)');
+    cylGrad.addColorStop(0.35, 'rgba(255,255,255,0.05)');
+    cylGrad.addColorStop(0.85, 'rgba(0,0,0,0.04)');
+    cylGrad.addColorStop(1, 'rgba(0,0,0,0.15)');
+    ctx2d.fillStyle = cylGrad;
     ctx2d.fillRect(bodyX + 2, ly, bodyW - 4, layerH + 1);
 
-    drawSandTexture(bodyX + 2, ly, bodyW - 4, layerH, color);
+    // Depth gradient within each layer
+    const depthGrad = ctx2d.createLinearGradient(bodyX, ly, bodyX, ly + layerH);
+    depthGrad.addColorStop(0, 'rgba(255,255,255,0.04)');
+    depthGrad.addColorStop(1, 'rgba(0,0,0,0.06)');
+    ctx2d.fillStyle = depthGrad;
+    ctx2d.fillRect(bodyX + 2, ly, bodyW - 4, layerH + 1);
+
+    drawSandTexture(bodyX + 2, ly, bodyW - 4, layerH, color, i, l);
+
+    // Curved meniscus on top layer
+    if (isTopLayer) {
+      const meniscusDepth = Math.min(4, layerH * 0.2);
+      ctx2d.save();
+      // Dark curve at top of sand
+      ctx2d.beginPath();
+      ctx2d.moveTo(bodyX + 2, ly);
+      ctx2d.quadraticCurveTo(x, ly + meniscusDepth, bodyX + bodyW - 2, ly);
+      ctx2d.lineTo(bodyX + bodyW - 2, ly - 1);
+      ctx2d.lineTo(bodyX + 2, ly - 1);
+      ctx2d.closePath();
+      ctx2d.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx2d.fill();
+      // Subtle highlight arc below the meniscus
+      ctx2d.beginPath();
+      ctx2d.moveTo(bodyX + bW * 0.2, ly + meniscusDepth * 0.5);
+      ctx2d.quadraticCurveTo(x, ly + meniscusDepth * 1.2, bodyX + bodyW - bW * 0.2, ly + meniscusDepth * 0.5);
+      ctx2d.strokeStyle = `rgba(255,255,255,0.08)`;
+      ctx2d.lineWidth = 1;
+      ctx2d.stroke();
+      ctx2d.restore();
+    }
   }
 
   ctx2d.restore();
-  ctx2d.save();
 
+  // ── Glass outline with tapered neck ──
+  ctx2d.save();
   if (selected) {
     ctx2d.shadowColor = 'rgba(255,255,255,0.6)';
     ctx2d.shadowBlur = 18;
@@ -437,7 +617,6 @@ function drawBottle(i, selected, hinted) {
     ctx2d.shadowBlur = 16;
   }
 
-  // Bottle glass outline
   ctx2d.strokeStyle = selected
     ? 'rgba(255,255,255,0.85)'
     : hinted
@@ -445,38 +624,51 @@ function drawBottle(i, selected, hinted) {
     : 'rgba(180,220,255,0.35)';
   ctx2d.lineWidth = selected ? 2.5 : 1.8;
 
-  // Neck
+  // Tapered neck — bezier curves from neck to body
   const neckX = x - neckW / 2;
+  // Left side: neck → body with curve
   ctx2d.beginPath();
   ctx2d.moveTo(neckX, y);
-  ctx2d.lineTo(neckX, y + neckH);
-  ctx2d.lineTo(bodyX, y + neckH);
+  ctx2d.lineTo(neckX, y + neckH * 0.5);
+  ctx2d.quadraticCurveTo(neckX, y + neckH, bodyX, y + neckH);
   ctx2d.stroke();
 
+  // Right side
   ctx2d.beginPath();
   ctx2d.moveTo(neckX + neckW, y);
-  ctx2d.lineTo(neckX + neckW, y + neckH);
-  ctx2d.lineTo(bodyX + bodyW, y + neckH);
+  ctx2d.lineTo(neckX + neckW, y + neckH * 0.5);
+  ctx2d.quadraticCurveTo(neckX + neckW, y + neckH, bodyX + bodyW, y + neckH);
+  ctx2d.stroke();
+
+  // Glass lip/rim at top
+  ctx2d.beginPath();
+  ctx2d.moveTo(neckX - 1, y);
+  ctx2d.lineTo(neckX + neckW + 1, y);
+  ctx2d.strokeStyle = selected ? 'rgba(255,255,255,0.5)' : 'rgba(180,220,255,0.25)';
+  ctx2d.lineWidth = selected ? 2 : 1.5;
   ctx2d.stroke();
 
   // Body outline
+  ctx2d.strokeStyle = selected
+    ? 'rgba(255,255,255,0.85)'
+    : hinted
+    ? 'rgba(245,166,35,0.85)'
+    : 'rgba(180,220,255,0.35)';
+  ctx2d.lineWidth = selected ? 2.5 : 1.8;
   ctx2d.beginPath();
   roundRect(ctx2d, bodyX, bodyY, bodyW, bodyH, br);
   ctx2d.stroke();
 
-  // Glass shine
-  ctx2d.beginPath();
-  ctx2d.moveTo(bodyX + bW * 0.15, bodyY + bH * 0.08);
-  ctx2d.lineTo(bodyX + bW * 0.15, bodyY + bH * 0.35);
-  ctx2d.strokeStyle = 'rgba(255,255,255,0.18)';
-  ctx2d.lineWidth = bW * 0.06;
-  ctx2d.lineCap = 'round';
-  ctx2d.stroke();
+  ctx2d.restore();
+
+  // ── Glass highlights ──
+  drawGlassHighlights(bodyX, bodyY, bodyW, bodyH, bW, neckX, neckW, y, neckH);
 
   // Completed bottle glow — enhanced golden shimmer
   const b = State.bottles[i];
   if (b.length === capacity && b.every(v => v === b[0])) {
     const glowColor = State.colors[b[0]]?.hex || '#fff';
+    ctx2d.save();
     ctx2d.shadowColor = glowColor;
     ctx2d.shadowBlur = 24;
     ctx2d.beginPath();
@@ -484,22 +676,23 @@ function drawBottle(i, selected, hinted) {
     ctx2d.strokeStyle = glowColor;
     ctx2d.lineWidth = 2.5;
     ctx2d.stroke();
+    ctx2d.restore();
 
     // Floating sparkle particles for completed bottles
     if (State.animationsEnabled) {
       const now = performance.now();
-      const sparkleCount = 3;
+      const sparkleCount = 4;
       for (let s = 0; s < sparkleCount; s++) {
-        const phase = (now / 1500 + s * 2.09) % 1;
-        const sx = bodyX + bW * 0.2 + Math.sin(now / 800 + s * 1.5) * bW * 0.3;
+        const phase = (now / 1500 + s * 1.57) % 1;
+        const sx = bodyX + bW * 0.15 + Math.sin(now / 700 + s * 1.8) * bW * 0.35;
         const sy = bodyY + bodyH * (1 - phase);
-        const alpha = Math.sin(phase * Math.PI) * 0.6;
-        const size = 1.5 + Math.sin(now / 400 + s) * 0.8;
+        const alpha = Math.sin(phase * Math.PI) * 0.7;
+        const size = 1.5 + Math.sin(now / 350 + s) * 1;
         ctx2d.save();
         ctx2d.globalAlpha = alpha;
         ctx2d.fillStyle = '#fff';
         ctx2d.shadowColor = glowColor;
-        ctx2d.shadowBlur = 6;
+        ctx2d.shadowBlur = 8;
         ctx2d.beginPath();
         ctx2d.arc(sx, sy, size, 0, Math.PI * 2);
         ctx2d.fill();
@@ -507,8 +700,6 @@ function drawBottle(i, selected, hinted) {
       }
     }
   }
-
-  ctx2d.restore();
 
   // Draw shockwave effect if active
   const effect = bottleEffects[i];
@@ -532,7 +723,9 @@ function drawBottle(i, selected, hinted) {
     }
   }
 
-  // Debug overlay
+  ctx2d.restore(); // restore the per-bottle transform
+
+  // Debug overlay (outside transform so labels stay upright)
   if (State.debugMode) {
     ctx2d.save();
     const numSize = Math.max(11, Math.min(16, neckW * 0.55));
@@ -540,27 +733,102 @@ function drawBottle(i, selected, hinted) {
     ctx2d.textAlign = 'center';
     ctx2d.textBaseline = 'bottom';
     const label = String(i + 1);
+    const dx = tf ? tf.dx || 0 : 0;
+    const dy = tf ? tf.dy || 0 : 0;
     ctx2d.strokeStyle = 'rgba(0,0,0,0.8)';
     ctx2d.lineWidth = 3;
-    ctx2d.strokeText(label, x, y - 3);
+    ctx2d.strokeText(label, x + dx, y + dy - 3);
     ctx2d.fillStyle = '#f5a623';
-    ctx2d.fillText(label, x, y - 3);
+    ctx2d.fillText(label, x + dx, y + dy - 3);
     ctx2d.restore();
   }
 }
 
-function drawSandTexture(x, y, w, h, color) {
-  const count = Math.floor(w * h / 80);
+/** Draw multiple glass highlight/reflection passes */
+function drawGlassHighlights(bodyX, bodyY, bodyW, bodyH, bW, neckX, neckW, neckTop, neckH) {
   ctx2d.save();
-  for (let i = 0; i < count; i++) {
-    const tx = x + Math.random() * w;
-    const ty = y + Math.random() * h;
-    const r = 0.8 + Math.random() * 1.2;
+
+  // Primary highlight — wide soft vertical stripe at ~20% from left
+  const hlGrad = ctx2d.createLinearGradient(bodyX + bW * 0.1, bodyY, bodyX + bW * 0.3, bodyY);
+  hlGrad.addColorStop(0, 'rgba(255,255,255,0)');
+  hlGrad.addColorStop(0.3, 'rgba(255,255,255,0.1)');
+  hlGrad.addColorStop(0.7, 'rgba(255,255,255,0.1)');
+  hlGrad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx2d.fillStyle = hlGrad;
+  ctx2d.fillRect(bodyX + bW * 0.1, bodyY + bodyH * 0.05, bW * 0.2, bodyH * 0.85);
+
+  // Specular highlight — thin bright line at 15%
+  ctx2d.beginPath();
+  ctx2d.moveTo(bodyX + bW * 0.15, bodyY + bodyH * 0.06);
+  ctx2d.lineTo(bodyX + bW * 0.15, bodyY + bodyH * 0.4);
+  ctx2d.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx2d.lineWidth = bW * 0.05;
+  ctx2d.lineCap = 'round';
+  ctx2d.stroke();
+
+  // Secondary short shine lower
+  ctx2d.beginPath();
+  ctx2d.moveTo(bodyX + bW * 0.18, bodyY + bodyH * 0.55);
+  ctx2d.lineTo(bodyX + bW * 0.18, bodyY + bodyH * 0.65);
+  ctx2d.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx2d.lineWidth = bW * 0.03;
+  ctx2d.stroke();
+
+  // Rim light — subtle bright line on right edge
+  ctx2d.beginPath();
+  ctx2d.moveTo(bodyX + bodyW - bW * 0.08, bodyY + bodyH * 0.1);
+  ctx2d.lineTo(bodyX + bodyW - bW * 0.08, bodyY + bodyH * 0.7);
+  ctx2d.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx2d.lineWidth = bW * 0.04;
+  ctx2d.lineCap = 'round';
+  ctx2d.stroke();
+
+  // Neck shine
+  ctx2d.beginPath();
+  ctx2d.moveTo(neckX + neckW * 0.2, neckTop + 2);
+  ctx2d.lineTo(neckX + neckW * 0.2, neckTop + neckH * 0.7);
+  ctx2d.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx2d.lineWidth = neckW * 0.06;
+  ctx2d.lineCap = 'round';
+  ctx2d.stroke();
+
+  ctx2d.restore();
+}
+
+/** Deterministic sand texture using seeded PRNG */
+function drawSandTexture(x, y, w, h, color, bottleIdx, layerIdx) {
+  const cacheKey = `${bottleIdx}_${layerIdx}_${sandTextureCacheVersion}`;
+  let dots = sandTextureCache.get(cacheKey);
+
+  if (!dots) {
+    // Seeded PRNG (simple mulberry32)
+    let seed = (bottleIdx * 997 + layerIdx * 131 + 12345) >>> 0;
+    function rand() {
+      seed = (seed + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+
+    const count = Math.floor(w * h / 80);
+    dots = [];
+    for (let i = 0; i < count; i++) {
+      dots.push({
+        rx: rand(), ry: rand(),
+        r: 0.8 + rand() * 1.2,
+        bright: rand() < 0.5,
+      });
+    }
+    sandTextureCache.set(cacheKey, dots);
+  }
+
+  ctx2d.save();
+  for (const d of dots) {
+    const tx = x + d.rx * w;
+    const ty = y + d.ry * h;
     ctx2d.beginPath();
-    ctx2d.arc(tx, ty, r, 0, Math.PI * 2);
-    ctx2d.fillStyle = Math.random() < 0.5
-      ? 'rgba(255,255,255,0.12)'
-      : 'rgba(0,0,0,0.12)';
+    ctx2d.arc(tx, ty, d.r, 0, Math.PI * 2);
+    ctx2d.fillStyle = d.bright ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)';
     ctx2d.fill();
   }
   ctx2d.restore();
@@ -585,7 +853,11 @@ let hintTimer = null;
 let needsAnimationFrame = false; // for sparkle particles
 
 function render() {
-  ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+  const now = performance.now();
+
+  // Animated background replaces clearRect
+  drawBackground(now);
+
   let hasAnimatingEffects = false;
 
   for (let i = 0; i < State.bottles.length; i++) {
@@ -871,9 +1143,10 @@ function stopConfetti() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Animate sand pouring with sparkle trail particles.
+ * Tip-pour animation: bottle flies over, tips, sand particles fall with gravity, flies back.
+ * Phases: FLY_OVER (300ms) → TIP_POUR (variable) → UNTIP (200ms) → FLY_BACK (300ms)
  */
-function animatePour(srcIdx, dstIdx, colorIdx, count, onComplete) {
+function animateTipPour(srcIdx, dstIdx, colorIdx, count, onComplete) {
   if (!State.animationsEnabled) {
     onComplete();
     return;
@@ -886,119 +1159,194 @@ function animatePour(srcIdx, dstIdx, colorIdx, count, onComplete) {
   const color = State.colors[colorIdx];
   if (!color) { onComplete(); return; }
 
-  const { neckW } = Layout;
-  const startX = srcPos.x;
-  const startY = srcPos.y;
-  const endX = dstPos.x;
-  const endY = dstPos.y;
-  const cpX = (startX + endX) / 2;
-  const cpY = Math.min(startY, endY) - 60;
+  const { bottleW: bW, bottleH: bH, neckW, neckH } = Layout;
 
-  const DURATION = 420;
-  const PARTICLE_COUNT = 18;
-  const SPARKLE_COUNT = 8;
+  // Save original position
+  const origX = srcPos.x;
+  const origY = srcPos.y;
+
+  // Determine tip direction: tip toward the destination
+  const tipRight = srcPos.x <= dstPos.x;
+  const tipSign = tipRight ? 1 : -1;
+  const tipAngle = tipSign * (Math.PI * 0.52); // ~94 degrees
+
+  // Fly-to position: above the destination, offset so mouth aligns
+  const hoverX = dstPos.x - tipSign * bW * 0.15;
+  const hoverY = dstPos.y - bH * 0.45 - neckH;
+
+  // Pivot point for rotation (center of bottle)
+  const pivotOffY = neckH + bH / 2;
+
+  // Phase timings
+  const FLY_OVER = 300;
+  const POUR_PER_GRAIN = 100;
+  const POUR_DURATION = Math.max(350, count * POUR_PER_GRAIN);
+  const UNTIP = 200;
+  const FLY_BACK = 300;
+  const TOTAL = FLY_OVER + POUR_DURATION + UNTIP + FLY_BACK;
+
   const startTime = performance.now();
 
-  const particles = Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
-    t: i / PARTICLE_COUNT,
-    size: 2.5 + Math.random() * 2.5,
-    offset: (Math.random() - 0.5) * (neckW * 0.4),
-  }));
+  // Gravity particles for the sand stream
+  let pourParticles = [];
+  let lastSpawnTime = 0;
+  const SPAWN_INTERVAL = 35;
 
-  // Sparkle trail particles
-  const sparkles = Array.from({ length: SPARKLE_COUNT }, () => ({
-    t: Math.random(),
-    size: 1 + Math.random() * 2,
-    offset: (Math.random() - 0.5) * (neckW * 0.8),
-    yOff: (Math.random() - 0.5) * 10,
-    phase: Math.random() * Math.PI * 2,
-  }));
+  function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+  function easeInCubic(t) { return t * t * t; }
 
-  function bezier(t, p0, p1, p2) {
-    const mt = 1 - t;
-    return mt * mt * p0 + 2 * mt * t * p1 + t * t * p2;
+  function getMouthPos(posX, posY, rotation) {
+    // Mouth is at top-center of bottle when upright
+    // When rotated around pivot (center of bottle), calculate new position
+    const px = posX;
+    const py = posY + pivotOffY;
+    const mouthRelX = 0;
+    const mouthRelY = -pivotOffY;
+    const cos = Math.cos(rotation);
+    const sin = Math.sin(rotation);
+    return {
+      x: px + mouthRelX * cos - mouthRelY * sin,
+      y: py + mouthRelX * sin + mouthRelY * cos,
+    };
   }
 
   function frame(now) {
     const elapsed = now - startTime;
-    const progress = Math.min(elapsed / DURATION, 1);
+    const phase = elapsed < FLY_OVER ? 0
+      : elapsed < FLY_OVER + POUR_DURATION ? 1
+      : elapsed < FLY_OVER + POUR_DURATION + UNTIP ? 2
+      : 3;
 
+    let curX = origX, curY = origY, curRot = 0;
+
+    if (phase === 0) {
+      // FLY OVER
+      const t = easeInOutCubic(Math.min(elapsed / FLY_OVER, 1));
+      curX = origX + (hoverX - origX) * t;
+      curY = origY + (hoverY - origY) * t;
+      curRot = tipSign * -0.08 * Math.sin(t * Math.PI); // slight anticipation wobble
+    } else if (phase === 1) {
+      // TIP & POUR
+      const phaseElapsed = elapsed - FLY_OVER;
+      const t = Math.min(phaseElapsed / POUR_DURATION, 1);
+      curX = hoverX;
+      curY = hoverY;
+      // Ramp up rotation quickly, hold, then stay
+      const tipT = Math.min(t * 2.5, 1);
+      curRot = tipAngle * easeOutCubic(tipT);
+
+      // Spawn sand particles from mouth
+      if (now - lastSpawnTime > SPAWN_INTERVAL && t < 0.9) {
+        const mouth = getMouthPos(curX, curY, curRot);
+        for (let j = 0; j < 2; j++) {
+          pourParticles.push({
+            x: mouth.x + (Math.random() - 0.5) * neckW * 0.3,
+            y: mouth.y,
+            vx: tipSign * (0.3 + Math.random() * 0.8) + (Math.random() - 0.5) * 0.5,
+            vy: 0.5 + Math.random() * 1,
+            size: 2 + Math.random() * 2.5,
+            life: 1,
+          });
+        }
+        lastSpawnTime = now;
+      }
+    } else if (phase === 2) {
+      // UNTIP
+      const phaseElapsed = elapsed - FLY_OVER - POUR_DURATION;
+      const t = easeInOutCubic(Math.min(phaseElapsed / UNTIP, 1));
+      curX = hoverX;
+      curY = hoverY;
+      curRot = tipAngle * (1 - t);
+    } else {
+      // FLY BACK
+      const phaseElapsed = elapsed - FLY_OVER - POUR_DURATION - UNTIP;
+      const t = easeInOutCubic(Math.min(phaseElapsed / FLY_BACK, 1));
+      curX = hoverX + (origX - hoverX) * t;
+      curY = hoverY + (origY - hoverY) * t;
+      curRot = 0;
+    }
+
+    // Set transform for source bottle
+    bottleTransforms[srcIdx] = {
+      dx: curX - origX,
+      dy: curY - origY,
+      rotation: curRot,
+      pivotX: origX,
+      pivotY: origY + pivotOffY,
+    };
+
+    // Update gravity particles
+    const dstNeckY = dstPos.y;
+    for (const p of pourParticles) {
+      p.vy += 0.45; // gravity
+      p.x += p.vx;
+      p.y += p.vy;
+      // Fade when past destination bottle neck
+      if (p.y > dstNeckY + bH * 0.3) {
+        p.life -= 0.1;
+      }
+    }
+    pourParticles = pourParticles.filter(p => p.life > 0 && p.y < dstPos.y + bH + neckH + 20);
+
+    // Render
     render();
+
+    // Draw pour particles on top
     ctx2d.save();
-
-    // Draw arc path as a thick colored line (the stream)
-    const streamSteps = 30;
-    for (let s = 0; s < streamSteps - 1; s++) {
-      const t0 = s / streamSteps;
-      const t1 = (s + 1) / streamSteps;
-      const x0 = bezier(t0, startX, cpX, endX);
-      const y0 = bezier(t0, startY, cpY, endY);
-      const x1 = bezier(t1, startX, cpX, endX);
-      const y1 = bezier(t1, startY, cpY, endY);
-      if (t0 > progress) break;
-
-      const alpha = 0.7 - t0 * 0.3;
-      const width = neckW * 0.35 * (1 - t0 * 0.5);
+    for (const p of pourParticles) {
+      ctx2d.globalAlpha = Math.max(0, p.life * 0.85);
+      ctx2d.fillStyle = color.hex;
       ctx2d.beginPath();
-      ctx2d.moveTo(x0, y0);
-      ctx2d.lineTo(x1, y1);
-      ctx2d.strokeStyle = color.hex;
-      ctx2d.lineWidth = width;
+      ctx2d.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx2d.fill();
+      // Highlight
+      ctx2d.globalAlpha = Math.max(0, p.life * 0.35);
+      ctx2d.fillStyle = color.light;
+      ctx2d.beginPath();
+      ctx2d.arc(p.x - p.size * 0.2, p.y - p.size * 0.2, p.size * 0.4, 0, Math.PI * 2);
+      ctx2d.fill();
+    }
+
+    // Draw a thin continuous stream during pour phase
+    if (phase === 1) {
+      const mouth = getMouthPos(curX, curY, curRot);
+      const streamEndY = dstPos.y + neckH * 0.5;
+      const streamGrad = ctx2d.createLinearGradient(mouth.x, mouth.y, mouth.x, streamEndY);
+      streamGrad.addColorStop(0, color.hex);
+      streamGrad.addColorStop(0.7, color.hex);
+      streamGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx2d.strokeStyle = streamGrad;
+      ctx2d.lineWidth = neckW * 0.2;
       ctx2d.lineCap = 'round';
-      ctx2d.globalAlpha = alpha;
+      ctx2d.globalAlpha = 0.6;
+      ctx2d.beginPath();
+      ctx2d.moveTo(mouth.x, mouth.y);
+      // Slight curve toward destination center
+      const cpStreamX = (mouth.x + dstPos.x) / 2;
+      ctx2d.quadraticCurveTo(cpStreamX, (mouth.y + streamEndY) / 2, dstPos.x, streamEndY);
       ctx2d.stroke();
     }
 
-    // Draw particles
-    particles.forEach(p => {
-      const pt = (p.t + progress * 1.2) % 1;
-      if (pt > progress + 0.1) return;
-      const px = bezier(pt, startX, cpX, endX) + p.offset * (1 - pt);
-      const py = bezier(pt, startY, cpY, endY);
-      ctx2d.beginPath();
-      ctx2d.arc(px, py, p.size, 0, Math.PI * 2);
-      ctx2d.fillStyle = color.hex;
-      ctx2d.globalAlpha = 0.85;
-      ctx2d.fill();
-
-      ctx2d.beginPath();
-      ctx2d.arc(px - p.size * 0.25, py - p.size * 0.25, p.size * 0.35, 0, Math.PI * 2);
-      ctx2d.fillStyle = color.light;
-      ctx2d.globalAlpha = 0.5;
-      ctx2d.fill();
-    });
-
-    // Draw sparkle trail particles — glowing white dots with bloom
-    sparkles.forEach(sp => {
-      const spT = (sp.t + progress * 1.1) % 1;
-      if (spT > progress + 0.05) return;
-      const spx = bezier(spT, startX, cpX, endX) + sp.offset;
-      const spy = bezier(spT, startY, cpY, endY) + sp.yOff;
-      const twinkle = 0.3 + Math.sin(now / 100 + sp.phase) * 0.3;
-
-      ctx2d.save();
-      ctx2d.globalAlpha = twinkle;
-      ctx2d.shadowColor = '#fff';
-      ctx2d.shadowBlur = 6;
-      ctx2d.fillStyle = '#fff';
-      ctx2d.beginPath();
-      ctx2d.arc(spx, spy, sp.size, 0, Math.PI * 2);
-      ctx2d.fill();
-      ctx2d.restore();
-    });
-
-    ctx2d.globalAlpha = 1;
     ctx2d.restore();
 
-    if (progress < 1) {
+    if (elapsed < TOTAL) {
       requestAnimationFrame(frame);
     } else {
+      delete bottleTransforms[srcIdx];
       render();
       onComplete();
     }
   }
 
   requestAnimationFrame(frame);
+}
+
+/** Legacy bezier pour - kept as fallback (unused but preserved) */
+function animatePour(srcIdx, dstIdx, colorIdx, count, onComplete) {
+  animateTipPour(srcIdx, dstIdx, colorIdx, count, onComplete);
 }
 
 function animateLift(bottleIdx, up, onComplete) {
@@ -1145,6 +1493,7 @@ function executePour(srcIdx, dstIdx) {
     for (let i = 0; i < count; i++) {
       State.bottles[dstIdx].push(State.bottles[srcIdx].pop());
     }
+    invalidateSandTextureCache();
 
     animatePour(srcIdx, dstIdx, colorIdx, count, () => {
       Audio.playSandLand();
@@ -1232,6 +1581,7 @@ function undoMove() {
   }
 
   State.bottles = State.history.pop();
+  invalidateSandTextureCache();
   State.moveCount = Math.max(0, State.moveCount - 1);
   State.comboCount = 0; // undo breaks combo
   clearHint();
@@ -1519,6 +1869,14 @@ function showScreen(id) {
 
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+
+  // Start/stop background animation loop
+  if (id === 'screen-game') {
+    if (bgParticles.length === 0) initBgParticles();
+    startBgLoop();
+  } else {
+    stopBgLoop();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
